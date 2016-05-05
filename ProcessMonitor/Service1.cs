@@ -30,14 +30,14 @@ namespace ProcessMonitor
         #endregion SETTINGS
 
         #region VARDEC
+
         //Auxiliary Variable
         private readonly Timer timer = new Timer();
         int killedProcs;
         string toLogFile = "";
-
-
         //Processes
         private List<MyProcess> forbiddenProcessesList;
+
         #endregion VARDEC
 
         #region START, STOP, INIT & DEBUG METHODS
