@@ -33,29 +33,5 @@ namespace ProcessMonitor {
                 this["Day"] = value;
             }
         }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("00:00:00")]
-        public global::System.TimeSpan Runtime {
-            get {
-                return ((global::System.TimeSpan)(this["Runtime"]));
-            }
-            set {
-                this["Runtime"] = value;
-            }
-        }
-        
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("00:00:00")]
-        public global::System.TimeSpan BonusTime {
-            get {
-                return ((global::System.TimeSpan)(this["BonusTime"]));
-            }
-            set {
-                this["BonusTime"] = value;
-            }
-        }
     }
 }
