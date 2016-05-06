@@ -74,12 +74,12 @@ namespace ProcessMonitor
             forbiddenProcessesList = new List<MyProcess>();
             var proc1 = new MyProcess()
             {
-                name = "winamp",
+                name = "atom",
                 allowedRunningTime = TimeSpan.FromMinutes(2)
             };
             var proc2 = new MyProcess()
             {
-                name = "vlc",
+                name = "rainmeter",
             };
             forbiddenProcessesList.Add(proc1);
             forbiddenProcessesList.Add(proc2);
@@ -220,19 +220,24 @@ namespace ProcessMonitor
         {
             try
             {
-                FileInfo fi = new FileInfo(pathstring);
-                if (fi.Length > 2e+7) //20 Megabyte
-                {
-                    File.Delete(pathstring);
-                }
+                deleteLogFileIfTooBig();
                 File.AppendAllText(pathstring, Environment.NewLine + "-----NEW ENTRY-----" + Environment.NewLine + DateTime.Now + Environment.NewLine);
                 File.AppendAllText(pathstring, toLogFile);
                 toLogFile = "";
+                
             }
             catch (Exception e2)
             {
                 Console.WriteLine(e2);
             }
+        }
+
+        private void deleteLogFileIfTooBig()
+        {
+            if (File.Exists(pathstring) && new FileInfo(pathstring).Length > 2e+7) //20 Megabyte
+            {
+                File.Delete(pathstring);
+            }  
         }
 
         #endregion LOG
