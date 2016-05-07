@@ -1,0 +1,16 @@
+﻿[
+    {
+        "name": "atom",
+        "allowedRunningTime": "00:02:00",
+        "actualRunningTime": "00:00:00",
+        "warningTime": "00:01:00",
+        "processInstances": 0
+    },
+    {
+        "name": "rainmeter",
+        "allowedRunningTime": "00:03:00",
+        "actualRunningTime": "00:00:00",
+        "warningTime": "00:01:00",
+        "processInstances": 0
+    }
+]

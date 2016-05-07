@@ -11,6 +11,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Timers;
 using System.Windows.Forms;
+using Newtonsoft.Json;
 using Timer = System.Timers.Timer;
 
 namespace ProcessMonitor
@@ -20,12 +21,17 @@ namespace ProcessMonitor
         #region SETTINGS
 
         public bool showWarnings = true;
-        //Folderpath of Logfile
-        public static string filepath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        //Folderpath of Files --> //"C:\\Users\\XXX\\AppData\\Roaming\\Process Monitor"
+        //public static string folderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Process Monitor");
+        public static string folderPath = System.AppDomain.CurrentDomain.BaseDirectory;
         //Filename of Logfile
-        public static string filename = "ProcessMonitorLogFile.txt";
+        public static string logFileName = "ProcessMonitorLogFile.txt";
         //Complete string to Logfile Location
-        readonly string pathstring = Path.Combine(filepath, filename);
+        readonly string pathStringLogFile = Path.Combine(folderPath, logFileName);
+        //Filename of ProcessFile
+        public static string processFileName = "ProcessMonitorProcessFile.json";
+        //Complete string to ProcessFile Location
+        readonly string pathStringProcessFile = Path.Combine(folderPath, processFileName);
 
         #endregion SETTINGS
 
@@ -34,7 +40,6 @@ namespace ProcessMonitor
         //Auxiliary Variable
         private readonly Timer timer = new Timer();
         int killedProcs;
-        string toLogFile = "";
         //Processes
         private List<MyProcess> forbiddenProcessesList;
 
@@ -54,12 +59,67 @@ namespace ProcessMonitor
 
         protected override void OnStart(string[] args)
         {
-            toLogFile = "";
-            toLogFile = "Service started!";
-            writeToLogFile();
+            writeToLogFile("Service started!");
 
-            initializeProcessList();
+            checkOwnFolder();
+
+            handleProcessList();
+
             initializeTimer();
+        }
+
+        private void handleProcessList()
+        {
+            if (File.Exists(pathStringProcessFile))
+            {
+                readProcessList();
+                writeToLogFile("Process List File read from " + pathStringProcessFile + ".");
+            }
+            else
+            {
+                createExampleProcessList();
+                writeProcessListToFile();
+                MessageBox.Show("Please got to \"" + folderPath + "\" and insert your desired Processes into the JSON-File \"" + processFileName + "\"." + Environment.NewLine + "The Logfile is also located in the same Directory.");
+                writeToLogFile("Example Process List File created at " + pathStringProcessFile + ".");
+            }
+        }
+
+        private void checkOwnFolder()
+        {
+            if (Directory.Exists(folderPath)) return;
+            Directory.CreateDirectory(folderPath);
+        }
+
+        private void createExampleProcessList()
+        {
+            forbiddenProcessesList = new List<MyProcess>();
+            var proc1 = new MyProcess()
+            {
+                name = "Example Process Name 1",
+                allowedRunningTime = TimeSpan.FromMinutes(30),
+                warningTime = TimeSpan.FromMinutes(5)
+            };
+            var proc2 = new MyProcess()
+            {
+                name = "Example Process Name 2",
+                allowedRunningTime = TimeSpan.FromMinutes(60),
+                warningTime = TimeSpan.FromMinutes(10)
+                
+            };
+            forbiddenProcessesList.Add(proc1);
+            forbiddenProcessesList.Add(proc2);     
+        }
+
+        private void readProcessList()
+        {
+            forbiddenProcessesList = new List<MyProcess>();
+            var fileStream = File.Open(pathStringProcessFile, FileMode.Open);
+
+            using (StreamReader sr = new StreamReader(fileStream))
+            {
+                forbiddenProcessesList = JsonConvert.DeserializeObject<List<MyProcess>>(sr.ReadToEnd());
+            }
+            fileStream.Close();
         }
 
         private void initializeTimer()
@@ -69,6 +129,10 @@ namespace ProcessMonitor
             timer.Enabled = true;
         }
 
+        /// <summary>
+        /// DEBUG Method
+        /// Not used anymore
+        /// </summary>
         private void initializeProcessList()
         {
             forbiddenProcessesList = new List<MyProcess>();
@@ -84,19 +148,33 @@ namespace ProcessMonitor
             forbiddenProcessesList.Add(proc1);
             forbiddenProcessesList.Add(proc2);
 
-            toLogFile += "There are " + forbiddenProcessesList.Count + " Processes forbidden:";
-            foreach (var myProcess in forbiddenProcessesList)
-            {
-                toLogFile += Environment.NewLine + "Name: " + myProcess.name + ". Allowed Runtime: " + myProcess.allowedRunningTime + ".";
-            }
-            writeToLogFile();
+            //toLogFile += "There are " + forbiddenProcessesList.Count + " Processes forbidden:";
+            //foreach (var myProcess in forbiddenProcessesList)
+            //{
+            //    toLogFile += Environment.NewLine + "Name: " + myProcess.name + ". Allowed Runtime: " + myProcess.allowedRunningTime + ".";
+            //}
+            //writeToLogFile();
         }
 
         protected override void OnStop()
         {
             timer.Enabled = false;
-            toLogFile = "Service stopped!";
-            writeToLogFile();
+            writeToLogFile("Service stopped!");
+        }
+
+        /// <summary>
+        /// Method to write Process List to Json File
+        /// </summary>
+        private void writeProcessListToFile()
+        {
+            var serializedList = JsonConvert.SerializeObject(forbiddenProcessesList);
+            var fileStream = File.Open(pathStringProcessFile, FileMode.OpenOrCreate);
+
+            using (StreamWriter sw = new StreamWriter(fileStream))
+            {
+                sw.Write(serializedList);
+            }
+            fileStream.Close();
         }
 
         #endregion START, STOP, INIT, DEBUG METHODS
@@ -109,12 +187,10 @@ namespace ProcessMonitor
             {
                 ProcessMonitorSettings.Default.Day = DateTime.Today;
                 resetProcessRunTimes();
-                toLogFile = "New Day.";
-                writeToLogFile();
+                writeToLogFile("New Day.");
             }
             var localProcesses = Process.GetProcesses();
-            toLogFile += "Number of running processes: " + localProcesses.Count();
-            writeToLogFile();
+            writeToLogFile("Number of running processes: " + localProcesses.Count());
             
             foreach (var forbiddenProcess in forbiddenProcessesList)
             {
@@ -122,8 +198,7 @@ namespace ProcessMonitor
                 if (checkIfProcessIsRunning(forbiddenProcess.name))
                 {
                     forbiddenProcess.actualRunningTime += TimeSpan.FromMinutes(1);
-                    toLogFile = "Scanned processes, target process '" + forbiddenProcess.name + "' is running. The process already ran " + forbiddenProcess.actualRunningTime + " Minutes today.";
-                    writeToLogFile();
+                    writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is running. The process already ran " + forbiddenProcess.actualRunningTime + " Minutes today.");
                 }
                 if (showWarnings)
                 {
@@ -143,14 +218,12 @@ namespace ProcessMonitor
                 //Write to Log that process is not running
                 else if (checkIfProcessIsRunning(forbiddenProcess.name) == false)
                 {
-                    toLogFile = "Scanned processes, target process '" + forbiddenProcess.name + "' is not running.";
-                    writeToLogFile();
+                    writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is not running.");
                 }
             }
             if (killedProcs != 0)
             {
-                toLogFile = "Total processes terminated: " + killedProcs;
-                writeToLogFile();
+                writeToLogFile("Total processes terminated: " + killedProcs);
                 killedProcs = 0;
             }
         }
@@ -201,14 +274,13 @@ namespace ProcessMonitor
             }
             if (processName.processInstances > 0)
             {
-                toLogFile += "Process terminated: '" + processName.name + "'. The Process had " + processName.processInstances + " Instances.";
-                writeToLogFile();
+                writeToLogFile("Process terminated: '" + processName.name + "'. The Process had " + processName.processInstances + " Instances.");
                 processName.processInstances = 0;
+                //TODO Message that time is up
             }
             else
             {
-                toLogFile = "Something went wrong killing the Process '" + processName.name + "'.";
-                writeToLogFile();
+                writeToLogFile("Something went wrong killing the Process '" + processName.name + "'.");
             }
         }
 
@@ -216,14 +288,13 @@ namespace ProcessMonitor
 
         #region LOG
 
-        private void writeToLogFile()
+        private void writeToLogFile(string stringToLog)
         {
             try
             {
                 deleteLogFileIfTooBig();
-                File.AppendAllText(pathstring, Environment.NewLine + "-----NEW ENTRY-----" + Environment.NewLine + DateTime.Now + Environment.NewLine);
-                File.AppendAllText(pathstring, toLogFile);
-                toLogFile = "";
+                File.AppendAllText(pathStringLogFile, Environment.NewLine + "-----NEW ENTRY-----" + Environment.NewLine + DateTime.Now + Environment.NewLine);
+                File.AppendAllText(pathStringLogFile, stringToLog);
                 
             }
             catch (Exception e2)
@@ -234,9 +305,9 @@ namespace ProcessMonitor
 
         private void deleteLogFileIfTooBig()
         {
-            if (File.Exists(pathstring) && new FileInfo(pathstring).Length > 2e+7) //20 Megabyte
+            if (File.Exists(pathStringLogFile) && new FileInfo(pathStringLogFile).Length > 2e+7) //20 Megabyte
             {
-                File.Delete(pathstring);
+                File.Delete(pathStringLogFile);
             }  
         }
 

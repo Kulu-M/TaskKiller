@@ -16,8 +16,9 @@ namespace ProcessMonitor
 
         public MyProcess()
         {
-            allowedRunningTime = TimeSpan.FromMinutes(3);
-            warningTime = TimeSpan.FromMinutes(1);
+            name = "ProcessName";
+            allowedRunningTime = TimeSpan.FromMinutes(120);
+            warningTime = TimeSpan.FromMinutes(5);
         }
     }
 }
