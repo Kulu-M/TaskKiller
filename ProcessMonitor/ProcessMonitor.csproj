@@ -52,6 +52,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Classes\Logger.cs" />
     <Compile Include="MyProcess.cs" />
     <Compile Include="ProcessMonitorSettings.Designer.cs">
       <AutoGen>True</AutoGen>

@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.ServiceProcess;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
 using System.Windows.Forms;
@@ -22,12 +23,10 @@ namespace ProcessMonitor
 
         public bool showWarnings = true;
         //Folderpath of Files --> //"C:\\Users\\XXX\\AppData\\Roaming\\Process Monitor"
-        //public static string folderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Process Monitor");
-        public static string folderPath = System.AppDomain.CurrentDomain.BaseDirectory;
-        //Filename of Logfile
-        public static string logFileName = "ProcessMonitorLogFile.txt";
-        //Complete string to Logfile Location
-        readonly string pathStringLogFile = Path.Combine(folderPath, logFileName);
+        public static string folderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Process Monitor");
+        //public static string folderPath = Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments);
+        //public static string folderPath = System.AppDomain.CurrentDomain.BaseDirectory;
+
         //Filename of ProcessFile
         public static string processFileName = "ProcessMonitorProcessFile.json";
         //Complete string to ProcessFile Location
@@ -42,6 +41,11 @@ namespace ProcessMonitor
         int killedProcs;
         //Processes
         private List<MyProcess> forbiddenProcessesList;
+        //Main Thread & Shutdown event:
+        private Thread _thread;
+        private ManualResetEvent _shutdownEvent = new ManualResetEvent(false);
+        //Logger
+        Logger log = new Logger();
 
         #endregion VARDEC
 
@@ -59,8 +63,30 @@ namespace ProcessMonitor
 
         protected override void OnStart(string[] args)
         {
-            writeToLogFile("Service started!");
+            log.writeToLogFile("Service started!");
 
+            //OnStart-Callback muss returnen, sonst sieht WIN den Service als 'timed out' an und killt ihn -> Logik muss in eigenem Thread laufen
+
+            log.writeToLogFile("Starting Thread!");
+
+            _thread = new Thread(ThreadWorkerLogic)
+            {
+                Name = "ProcessMonitor",
+                IsBackground = true
+            };
+            _thread.Start();
+        }
+
+        private void ThreadWorkerLogic()
+        {
+            while (!_shutdownEvent.WaitOne(0))
+            {
+                startLogic();
+            }
+        }
+
+        private void startLogic()
+        {
             checkOwnFolder();
 
             handleProcessList();
@@ -73,14 +99,21 @@ namespace ProcessMonitor
             if (File.Exists(pathStringProcessFile))
             {
                 readProcessList();
-                writeToLogFile("Process List File read from " + pathStringProcessFile + ".");
+                log.writeToLogFile("Process List File read from " + pathStringProcessFile + ".");
             }
             else
             {
                 createExampleProcessList();
                 writeProcessListToFile();
-                MessageBox.Show("Please got to \"" + folderPath + "\" and insert your desired Processes into the JSON-File \"" + processFileName + "\"." + Environment.NewLine + "The Logfile is also located in the same Directory.");
-                writeToLogFile("Example Process List File created at " + pathStringProcessFile + ".");
+                try
+                {
+                    MessageBox.Show("Please go to: " + folderPath + " and insert your desired Processes into the JSON-File: " + processFileName + "." + Environment.NewLine + "The Logfile is also located in the same Directory.");
+                }
+                catch (Exception)
+                {
+                    //ignore
+                }
+                log.writeToLogFile("Example Process List File created at " + pathStringProcessFile + ".");
             }
         }
 
@@ -112,14 +145,22 @@ namespace ProcessMonitor
 
         private void readProcessList()
         {
-            forbiddenProcessesList = new List<MyProcess>();
-            var fileStream = File.Open(pathStringProcessFile, FileMode.Open);
-
-            using (StreamReader sr = new StreamReader(fileStream))
+            try
             {
-                forbiddenProcessesList = JsonConvert.DeserializeObject<List<MyProcess>>(sr.ReadToEnd());
+                forbiddenProcessesList = new List<MyProcess>();
+                var fileStream = File.Open(pathStringProcessFile, FileMode.Open);
+
+                using (StreamReader sr = new StreamReader(fileStream))
+                {
+                    forbiddenProcessesList = JsonConvert.DeserializeObject<List<MyProcess>>(sr.ReadToEnd());
+                }
+                fileStream.Close();
             }
-            fileStream.Close();
+            catch (Exception e)
+            {
+                log.writeToLogFile("Exception happened while reading Process List Json File: " + e);
+            }
+            
         }
 
         private void initializeTimer()
@@ -159,7 +200,16 @@ namespace ProcessMonitor
         protected override void OnStop()
         {
             timer.Enabled = false;
-            writeToLogFile("Service stopped!");
+
+            log.writeToLogFile("Stopping Thread!");
+
+            _shutdownEvent.Set();
+            if (!_thread.Join(5000)) //Der Thread hat 5 Sekunden um sich zu schließen
+            {
+                _thread.Abort();
+                log.writeToLogFile("Thread stopped!");
+            }
+            log.writeToLogFile("Service stopped!");
         }
 
         /// <summary>
@@ -187,10 +237,10 @@ namespace ProcessMonitor
             {
                 ProcessMonitorSettings.Default.Day = DateTime.Today;
                 resetProcessRunTimes();
-                writeToLogFile("New Day.");
+                log.writeToLogFile("New Day.");
             }
             var localProcesses = Process.GetProcesses();
-            writeToLogFile("Number of running processes: " + localProcesses.Count());
+            log.writeToLogFile("Number of running processes: " + localProcesses.Count());
             
             foreach (var forbiddenProcess in forbiddenProcessesList)
             {
@@ -198,7 +248,7 @@ namespace ProcessMonitor
                 if (checkIfProcessIsRunning(forbiddenProcess.name))
                 {
                     forbiddenProcess.actualRunningTime += TimeSpan.FromMinutes(1);
-                    writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is running. The process already ran " + forbiddenProcess.actualRunningTime + " Minutes today.");
+                    log.writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is running. The process already ran " + forbiddenProcess.actualRunningTime + " Minutes today.");
                 }
                 if (showWarnings)
                 {
@@ -218,12 +268,12 @@ namespace ProcessMonitor
                 //Write to Log that process is not running
                 else if (checkIfProcessIsRunning(forbiddenProcess.name) == false)
                 {
-                    writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is not running.");
+                    log.writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is not running.");
                 }
             }
             if (killedProcs != 0)
             {
-                writeToLogFile("Total processes terminated: " + killedProcs);
+                log.writeToLogFile("Total processes terminated: " + killedProcs);
                 killedProcs = 0;
             }
         }
@@ -274,43 +324,17 @@ namespace ProcessMonitor
             }
             if (processName.processInstances > 0)
             {
-                writeToLogFile("Process terminated: '" + processName.name + "'. The Process had " + processName.processInstances + " Instances.");
+                log.writeToLogFile("Process terminated: '" + processName.name + "'. The Process had " + processName.processInstances + " Instances.");
                 processName.processInstances = 0;
                 //TODO Message that time is up
             }
             else
             {
-                writeToLogFile("Something went wrong killing the Process '" + processName.name + "'.");
+                log.writeToLogFile("Something went wrong killing the Process '" + processName.name + "'.");
             }
         }
 
         #endregion HANDLING TIMER AND RELEVANT METHODS
 
-        #region LOG
-
-        private void writeToLogFile(string stringToLog)
-        {
-            try
-            {
-                deleteLogFileIfTooBig();
-                File.AppendAllText(pathStringLogFile, Environment.NewLine + "-----NEW ENTRY-----" + Environment.NewLine + DateTime.Now + Environment.NewLine);
-                File.AppendAllText(pathStringLogFile, stringToLog);
-                
-            }
-            catch (Exception e2)
-            {
-                Console.WriteLine(e2);
-            }
-        }
-
-        private void deleteLogFileIfTooBig()
-        {
-            if (File.Exists(pathStringLogFile) && new FileInfo(pathStringLogFile).Length > 2e+7) //20 Megabyte
-            {
-                File.Delete(pathStringLogFile);
-            }  
-        }
-
-        #endregion LOG
     }
 }
