@@ -21,10 +21,11 @@ namespace ProcessMonitor
     {
         #region SETTINGS
 
+        public TimeSpan timeToThreadInMinutes = TimeSpan.FromMinutes(1);
         public bool showWarnings = true;
         //Folderpath of Files --> //"C:\\Users\\XXX\\AppData\\Roaming\\Process Monitor"
-        public static string folderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Process Monitor");
-        //public static string folderPath = Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments);
+        //public static string folderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ProcessMonitor");
+        public static string folderPath = Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments);
         //public static string folderPath = System.AppDomain.CurrentDomain.BaseDirectory;
 
         //Filename of ProcessFile
@@ -77,11 +78,30 @@ namespace ProcessMonitor
             _thread.Start();
         }
 
+        protected override void OnStop()
+        {
+            log.writeToLogFile("Stopping Thread!");
+
+            _shutdownEvent.Set();
+            if (!_thread.Join(5000)) //Der Thread hat 5 Sekunden um sich zu schließen
+            {
+                _thread.Abort();
+                log.writeToLogFile("Thread stopped!");
+            }
+            log.writeToLogFile("Service stopped!");
+        }
+
         private void ThreadWorkerLogic()
         {
             while (!_shutdownEvent.WaitOne(0))
             {
                 startLogic();
+
+                var timeToThreadInMs = timeToThreadInMinutes.TotalMilliseconds;
+
+                log.writeToLogFile("Thread will sleep now for: " + timeToThreadInMinutes + "Minutes.");
+
+                Thread.Sleep((int)timeToThreadInMs);
             }
         }
 
@@ -91,7 +111,13 @@ namespace ProcessMonitor
 
             handleProcessList();
 
-            initializeTimer();
+            processHandlingLogic();
+        }
+
+        private void checkOwnFolder()
+        {
+            if (Directory.Exists(folderPath)) return;
+            Directory.CreateDirectory(folderPath);
         }
 
         private void handleProcessList()
@@ -99,7 +125,7 @@ namespace ProcessMonitor
             if (File.Exists(pathStringProcessFile))
             {
                 readProcessList();
-                log.writeToLogFile("Process List File read from " + pathStringProcessFile + ".");
+                log.writeToLogFile("I have read the Process List File from " + pathStringProcessFile + ".");
             }
             else
             {
@@ -115,12 +141,6 @@ namespace ProcessMonitor
                 }
                 log.writeToLogFile("Example Process List File created at " + pathStringProcessFile + ".");
             }
-        }
-
-        private void checkOwnFolder()
-        {
-            if (Directory.Exists(folderPath)) return;
-            Directory.CreateDirectory(folderPath);
         }
 
         private void createExampleProcessList()
@@ -163,55 +183,6 @@ namespace ProcessMonitor
             
         }
 
-        private void initializeTimer()
-        {
-            timer.Elapsed += OnElapsedTime;
-            timer.Interval = 60000; //60Sekunden
-            timer.Enabled = true;
-        }
-
-        /// <summary>
-        /// DEBUG Method
-        /// Not used anymore
-        /// </summary>
-        private void initializeProcessList()
-        {
-            forbiddenProcessesList = new List<MyProcess>();
-            var proc1 = new MyProcess()
-            {
-                name = "atom",
-                allowedRunningTime = TimeSpan.FromMinutes(2)
-            };
-            var proc2 = new MyProcess()
-            {
-                name = "rainmeter",
-            };
-            forbiddenProcessesList.Add(proc1);
-            forbiddenProcessesList.Add(proc2);
-
-            //toLogFile += "There are " + forbiddenProcessesList.Count + " Processes forbidden:";
-            //foreach (var myProcess in forbiddenProcessesList)
-            //{
-            //    toLogFile += Environment.NewLine + "Name: " + myProcess.name + ". Allowed Runtime: " + myProcess.allowedRunningTime + ".";
-            //}
-            //writeToLogFile();
-        }
-
-        protected override void OnStop()
-        {
-            timer.Enabled = false;
-
-            log.writeToLogFile("Stopping Thread!");
-
-            _shutdownEvent.Set();
-            if (!_thread.Join(5000)) //Der Thread hat 5 Sekunden um sich zu schließen
-            {
-                _thread.Abort();
-                log.writeToLogFile("Thread stopped!");
-            }
-            log.writeToLogFile("Service stopped!");
-        }
-
         /// <summary>
         /// Method to write Process List to Json File
         /// </summary>
@@ -231,7 +202,7 @@ namespace ProcessMonitor
 
         #region HANDLING TIMER AND RELEVANT METHODS
 
-        private void OnElapsedTime(object source, ElapsedEventArgs e)
+        public void processHandlingLogic()
         {
             if (nextDay())
             {
@@ -241,13 +212,13 @@ namespace ProcessMonitor
             }
             var localProcesses = Process.GetProcesses();
             log.writeToLogFile("Number of running processes: " + localProcesses.Count());
-            
+
             foreach (var forbiddenProcess in forbiddenProcessesList)
             {
                 //Raise Runtime if process is running
                 if (checkIfProcessIsRunning(forbiddenProcess.name))
                 {
-                    forbiddenProcess.actualRunningTime += TimeSpan.FromMinutes(1);
+                    forbiddenProcess.actualRunningTime += timeToThreadInMinutes;
                     log.writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is running. The process already ran " + forbiddenProcess.actualRunningTime + " Minutes today.");
                 }
                 if (showWarnings)
@@ -259,7 +230,7 @@ namespace ProcessMonitor
                         sendWarning(forbiddenProcess);
                     }
                 }
-                
+
                 //Kill Process if Runtime is up
                 if (checkIfProcessIsRunning(forbiddenProcess.name) && forbiddenProcess.actualRunningTime >= forbiddenProcess.allowedRunningTime)
                 {
@@ -335,6 +306,33 @@ namespace ProcessMonitor
         }
 
         #endregion HANDLING TIMER AND RELEVANT METHODS
+
+        /// <summary>
+        /// DEBUG Method
+        /// Not used anymore
+        /// </summary>
+        private void initializeProcessList()
+        {
+            forbiddenProcessesList = new List<MyProcess>();
+            var proc1 = new MyProcess()
+            {
+                name = "atom",
+                allowedRunningTime = TimeSpan.FromMinutes(2)
+            };
+            var proc2 = new MyProcess()
+            {
+                name = "rainmeter",
+            };
+            forbiddenProcessesList.Add(proc1);
+            forbiddenProcessesList.Add(proc2);
+
+            //toLogFile += "There are " + forbiddenProcessesList.Count + " Processes forbidden:";
+            //foreach (var myProcess in forbiddenProcessesList)
+            //{
+            //    toLogFile += Environment.NewLine + "Name: " + myProcess.name + ". Allowed Runtime: " + myProcess.allowedRunningTime + ".";
+            //}
+            //writeToLogFile();
+        }
 
     }
 }
