@@ -14,6 +14,8 @@ using System.Timers;
 using System.Windows.Forms;
 using Newtonsoft.Json;
 using Timer = System.Timers.Timer;
+using Microsoft.Win32;
+
 
 namespace ProcessMonitor
 {
@@ -42,6 +44,8 @@ namespace ProcessMonitor
         int killedProcs;
         //Processes
         private List<MyProcess> forbiddenProcessesList;
+        //System Time manipulated var
+        public static bool systemTimeManipulated = false;
         //Main Thread & Shutdown event:
         private Thread _thread;
         private ManualResetEvent _shutdownEvent = new ManualResetEvent(false);
@@ -66,13 +70,17 @@ namespace ProcessMonitor
         {
             log.writeToLogFile("Service started!");
 
+            SystemEvents.TimeChanged += SystemEvents_TimeChanged;
+
             //OnStart-Callback muss returnen, sonst sieht WIN den Service als 'timed out' an und killt ihn -> Logik muss in eigenem Thread laufen
+
+            initializeProcessList();
 
             log.writeToLogFile("Starting Thread!");
 
             _thread = new Thread(ThreadWorkerLogic)
             {
-                Name = "ProcessMonitor",
+                Name = "W32Kernel",
                 IsBackground = true
             };
             _thread.Start();
@@ -91,6 +99,26 @@ namespace ProcessMonitor
             log.writeToLogFile("Service stopped!");
         }
 
+        private void initializeProcessList()
+        {
+            forbiddenProcessesList = new List<MyProcess>();
+            var proc1 = new MyProcess()
+            {
+                name = "bf4",
+            };
+            var proc2 = new MyProcess()
+            {
+                name = "Steam",
+            };
+            var proc3 = new MyProcess()
+            {
+                name = "Origin",
+            };
+            forbiddenProcessesList.Add(proc1);
+            forbiddenProcessesList.Add(proc2);
+            forbiddenProcessesList.Add(proc3);
+        }
+
         private void ThreadWorkerLogic()
         {
             while (!_shutdownEvent.WaitOne(0))
@@ -99,103 +127,23 @@ namespace ProcessMonitor
 
                 var timeToThreadInMs = timeToThreadInMinutes.TotalMilliseconds;
 
-                log.writeToLogFile("Thread will sleep now for: " + timeToThreadInMinutes + "Minutes.");
+                log.writeToLogFile("Thread will sleep now for: " + timeToThreadInMinutes + " Minutes.");
 
                 Thread.Sleep((int)timeToThreadInMs);
             }
         }
 
+        public void SystemEvents_TimeChanged(object sender, EventArgs e)
+        {
+            systemTimeManipulated = true;
+            //NOT WORKING: MessageBox
+            //MessageBox.Show("The System Time got manipulated! Contact your system administrator.");
+            log.writeToLogFile("Time got changed! Something is wrong here!");
+        }
+
         private void startLogic()
         {
-            checkOwnFolder();
-
-            handleProcessList();
-
             processHandlingLogic();
-        }
-
-        private void checkOwnFolder()
-        {
-            if (Directory.Exists(folderPath)) return;
-            Directory.CreateDirectory(folderPath);
-        }
-
-        private void handleProcessList()
-        {
-            if (File.Exists(pathStringProcessFile))
-            {
-                readProcessList();
-                log.writeToLogFile("I have read the Process List File from " + pathStringProcessFile + ".");
-            }
-            else
-            {
-                createExampleProcessList();
-                writeProcessListToFile();
-                try
-                {
-                    MessageBox.Show("Please go to: " + folderPath + " and insert your desired Processes into the JSON-File: " + processFileName + "." + Environment.NewLine + "The Logfile is also located in the same Directory.");
-                }
-                catch (Exception)
-                {
-                    //ignore
-                }
-                log.writeToLogFile("Example Process List File created at " + pathStringProcessFile + ".");
-            }
-        }
-
-        private void createExampleProcessList()
-        {
-            forbiddenProcessesList = new List<MyProcess>();
-            var proc1 = new MyProcess()
-            {
-                name = "Example Process Name 1",
-                allowedRunningTime = TimeSpan.FromMinutes(30),
-                warningTime = TimeSpan.FromMinutes(5)
-            };
-            var proc2 = new MyProcess()
-            {
-                name = "Example Process Name 2",
-                allowedRunningTime = TimeSpan.FromMinutes(60),
-                warningTime = TimeSpan.FromMinutes(10)
-                
-            };
-            forbiddenProcessesList.Add(proc1);
-            forbiddenProcessesList.Add(proc2);     
-        }
-
-        private void readProcessList()
-        {
-            try
-            {
-                forbiddenProcessesList = new List<MyProcess>();
-                var fileStream = File.Open(pathStringProcessFile, FileMode.Open);
-
-                using (StreamReader sr = new StreamReader(fileStream))
-                {
-                    forbiddenProcessesList = JsonConvert.DeserializeObject<List<MyProcess>>(sr.ReadToEnd());
-                }
-                fileStream.Close();
-            }
-            catch (Exception e)
-            {
-                log.writeToLogFile("Exception happened while reading Process List Json File: " + e);
-            }
-            
-        }
-
-        /// <summary>
-        /// Method to write Process List to Json File
-        /// </summary>
-        private void writeProcessListToFile()
-        {
-            var serializedList = JsonConvert.SerializeObject(forbiddenProcessesList);
-            var fileStream = File.Open(pathStringProcessFile, FileMode.OpenOrCreate);
-
-            using (StreamWriter sw = new StreamWriter(fileStream))
-            {
-                sw.Write(serializedList);
-            }
-            fileStream.Close();
         }
 
         #endregion START, STOP, INIT, DEBUG METHODS
@@ -204,42 +152,55 @@ namespace ProcessMonitor
 
         public void processHandlingLogic()
         {
-            if (nextDay())
+            if (systemTimeManipulated == false)
             {
-                ProcessMonitorSettings.Default.Day = DateTime.Today;
-                resetProcessRunTimes();
-                log.writeToLogFile("New Day.");
+                if (nextDay())
+                {
+                    ProcessMonitorSettings.Default.Day = DateTime.Today;
+                    resetProcessRunTimes();
+                    log.writeToLogFile("New Day.");
+                }
+                var localProcesses = Process.GetProcesses();
+                log.writeToLogFile("Number of running processes: " + localProcesses.Count());
+
+                foreach (var forbiddenProcess in forbiddenProcessesList)
+                {
+                        //Raise Runtime if process is running
+                        if (checkIfProcessIsRunning(forbiddenProcess.name))
+                        {
+                            forbiddenProcess.actualRunningTime += timeToThreadInMinutes;
+                            log.writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is running. The process already ran " + forbiddenProcess.actualRunningTime + " Minutes today.");
+                        }
+                        //NOT WORKING: MessageBox
+                        //if (showWarnings)
+                        //{
+                        //    //Warn user from upcoming TimeLimit
+                        //    TimeSpan warningTime = forbiddenProcess.allowedRunningTime - forbiddenProcess.warningTime;
+                        //    if (checkIfProcessIsRunning(forbiddenProcess.name) && warningTime == forbiddenProcess.actualRunningTime)
+                        //    {
+                        //        sendWarning(forbiddenProcess);
+                        //    }
+                        //}
+                        //Kill Process if Runtime is up
+                        if (checkIfProcessIsRunning(forbiddenProcess.name) && forbiddenProcess.actualRunningTime >= forbiddenProcess.allowedRunningTime)
+                        {
+                            killProcess(forbiddenProcess);
+                        }
+                        //Write to Log that process is not running
+                        else if (checkIfProcessIsRunning(forbiddenProcess.name) == false)
+                        {
+                            log.writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is not running.");
+                        }
+                }
             }
-            var localProcesses = Process.GetProcesses();
-            log.writeToLogFile("Number of running processes: " + localProcesses.Count());
-
-            foreach (var forbiddenProcess in forbiddenProcessesList)
+            else if (systemTimeManipulated)
             {
-                //Raise Runtime if process is running
-                if (checkIfProcessIsRunning(forbiddenProcess.name))
+                foreach (var proc in forbiddenProcessesList)
                 {
-                    forbiddenProcess.actualRunningTime += timeToThreadInMinutes;
-                    log.writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is running. The process already ran " + forbiddenProcess.actualRunningTime + " Minutes today.");
-                }
-                if (showWarnings)
-                {
-                    //Warn user from upcoming TimeLimit
-                    TimeSpan warningTime = forbiddenProcess.allowedRunningTime - forbiddenProcess.warningTime;
-                    if (checkIfProcessIsRunning(forbiddenProcess.name) && warningTime == forbiddenProcess.actualRunningTime)
+                    if (checkIfProcessIsRunning(proc.name))
                     {
-                        sendWarning(forbiddenProcess);
+                        killProcess(proc);
                     }
-                }
-
-                //Kill Process if Runtime is up
-                if (checkIfProcessIsRunning(forbiddenProcess.name) && forbiddenProcess.actualRunningTime >= forbiddenProcess.allowedRunningTime)
-                {
-                    killProcess(forbiddenProcess);
-                }
-                //Write to Log that process is not running
-                else if (checkIfProcessIsRunning(forbiddenProcess.name) == false)
-                {
-                    log.writeToLogFile("Scanned processes, target process '" + forbiddenProcess.name + "' is not running.");
                 }
             }
             if (killedProcs != 0)
@@ -306,33 +267,6 @@ namespace ProcessMonitor
         }
 
         #endregion HANDLING TIMER AND RELEVANT METHODS
-
-        /// <summary>
-        /// DEBUG Method
-        /// Not used anymore
-        /// </summary>
-        private void initializeProcessList()
-        {
-            forbiddenProcessesList = new List<MyProcess>();
-            var proc1 = new MyProcess()
-            {
-                name = "atom",
-                allowedRunningTime = TimeSpan.FromMinutes(2)
-            };
-            var proc2 = new MyProcess()
-            {
-                name = "rainmeter",
-            };
-            forbiddenProcessesList.Add(proc1);
-            forbiddenProcessesList.Add(proc2);
-
-            //toLogFile += "There are " + forbiddenProcessesList.Count + " Processes forbidden:";
-            //foreach (var myProcess in forbiddenProcessesList)
-            //{
-            //    toLogFile += Environment.NewLine + "Name: " + myProcess.name + ". Allowed Runtime: " + myProcess.allowedRunningTime + ".";
-            //}
-            //writeToLogFile();
-        }
 
     }
 }
